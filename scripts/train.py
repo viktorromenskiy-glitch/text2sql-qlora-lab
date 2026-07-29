@@ -75,9 +75,18 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     # Import here (not at module level) - trl/transformers are GPU-only
     # deps, keeping them out of the module-level import list means this
     # file can still be *parsed* (not run) without them installed locally.
-    from transformers import TrainingArguments
+    from transformers import TrainerCallback, TrainingArguments
     from trl import SFTTrainer
 
+    # NOTE: deliberately NOT setting save_steps/save_strategy here. HF
+    # Trainer's built-in periodic checkpointing tries to torch.save() the
+    # full TrainingArguments/SFTConfig object, which fails under Unsloth's
+    # dynamic class patching with:
+    #   _pickle.PicklingError: Can't pickle <class '...SFTConfig'>:
+    #   it's not the same object as trl.trainer.sft_config.SFTConfig
+    # (confirmed on a real run - see technical_lessons_learned.md).
+    # Saving only the adapter weights via trainer.save_model() below
+    # sidesteps this entirely - it never touches the args object.
     training_args = TrainingArguments(
         output_dir=config["checkpoint_dir"],
         per_device_train_batch_size=config["training"]["batch_size"],
@@ -85,10 +94,24 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
         num_train_epochs=config["training"]["num_epochs"],
         learning_rate=config["training"]["learning_rate"],
         logging_steps=config["training"]["logging_steps"],
-        save_steps=config["training"]["save_every_n_steps"],
-        save_total_limit=3,  # keep last 3 checkpoints, don't fill up Drive
+        save_strategy="no",  # disable built-in checkpointing (see note above)
         report_to="none",
     )
+
+    class PeriodicAdapterSaveCallback(TrainerCallback):
+        """Saves adapter weights only (not the full trainer state) every
+        `save_every_n_steps` steps - avoids the SFTConfig pickling bug."""
+
+        def __init__(self, trainer_ref: Any, checkpoint_dir: str, every_n_steps: int) -> None:
+            self.trainer_ref = trainer_ref
+            self.checkpoint_dir = checkpoint_dir
+            self.every_n_steps = every_n_steps
+
+        def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
+            if state.global_step > 0 and state.global_step % self.every_n_steps == 0:
+                path = f"{self.checkpoint_dir}/checkpoint-{state.global_step}"
+                self.trainer_ref.save_model(path)
+                print(f"Saved adapter checkpoint: {path}")
 
     trainer = SFTTrainer(
         model=model,
@@ -96,6 +119,13 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
         train_dataset=train_dataset,
         args=training_args,
         dataset_text_field="text",
+    )
+    trainer.add_callback(
+        PeriodicAdapterSaveCallback(
+            trainer_ref=trainer,
+            checkpoint_dir=config["checkpoint_dir"],
+            every_n_steps=config["training"]["save_every_n_steps"],
+        )
     )
 
     print("Starting training...")
