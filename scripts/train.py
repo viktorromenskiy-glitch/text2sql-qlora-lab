@@ -85,13 +85,14 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     #   _pickle.PicklingError: Can't pickle <class '...SFTConfig'>:
     #   it's not the same object as trl.trainer.sft_config.SFTConfig
     # (confirmed on a real run - see technical_lessons_learned.md).
-    # Saving only the adapter weights via trainer.save_model() below
-    # sidesteps this entirely - it never touches the args object.
+    # Saving adapter weights directly via model.save_pretrained() below
+    # (not trainer.save_model()) sidesteps this entirely.
     training_args = TrainingArguments(
         output_dir=config["checkpoint_dir"],
         per_device_train_batch_size=config["training"]["batch_size"],
         gradient_checkpointing=config["training"]["gradient_checkpointing"],
         num_train_epochs=config["training"]["num_epochs"],
+        max_steps=config["training"].get("max_steps", -1),  # -1 = no limit, run full num_epochs
         learning_rate=config["training"]["learning_rate"],
         logging_steps=config["training"]["logging_steps"],
         save_strategy="no",  # disable built-in checkpointing (see note above)
