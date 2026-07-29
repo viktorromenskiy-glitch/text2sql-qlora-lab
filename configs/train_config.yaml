@@ -22,7 +22,13 @@ training:
   batch_size: 4
   gradient_checkpointing: true
   num_epochs: 3
-  save_every_n_steps: 50
+  max_steps: 1200  # loss plateaued around step 900-1000 on the interrupted
+                    # run (see technical_lessons_learned.md) - stop with
+                    # margin past that point rather than running the full
+                    # 5250 steps for diminishing returns
+  save_every_n_steps: 100  # was 50 - too many checkpoints (105) for
+                            # available Drive space; halved given max_steps
+                            # is also much lower now (12 checkpoints total)
   logging_steps: 10
 
 # Google Drive path - MUST be mounted before train.py runs (see RUNBOOK step 0)
