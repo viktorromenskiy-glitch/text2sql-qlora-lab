@@ -21,7 +21,7 @@ from src.utils import set_seed, setup_logging
 
 SAMPLE_SIZE = 200  # MUST match evaluate_baseline.py - same examples, fair comparison
 DATA_DIR = "data/spider"
-CHECKPOINT_PATH = "/content/drive/MyDrive/text2sql-checkpoints/final"
+CHECKPOINT_PATH = "/content/drive/MyDrive/text2sql-checkpoints/checkpoint-1500"  # latest from interrupted run - training stopped early on loss plateau (see technical_lessons_learned.md)
 
 
 def main() -> None:
