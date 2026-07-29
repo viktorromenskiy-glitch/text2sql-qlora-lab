@@ -99,18 +99,27 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     )
 
     class PeriodicAdapterSaveCallback(TrainerCallback):
-        """Saves adapter weights only (not the full trainer state) every
-        `save_every_n_steps` steps - avoids the SFTConfig pickling bug."""
+        """Saves adapter weights only, via model.save_pretrained() - NOT
+        trainer.save_model(), which internally calls Trainer._save() and
+        ALWAYS tries to torch.save() the full TrainingArguments/SFTConfig
+        object regardless of how it's invoked (confirmed on a real run:
+        even called manually here, outside the save_steps mechanism, it
+        hit the same pickling error - see technical_lessons_learned.md).
+        model.save_pretrained() goes through PEFT's own save path instead,
+        which only writes adapter weights + config, never touching the
+        Trainer's args object at all."""
 
-        def __init__(self, trainer_ref: Any, checkpoint_dir: str, every_n_steps: int) -> None:
-            self.trainer_ref = trainer_ref
+        def __init__(self, model_ref: Any, tokenizer_ref: Any, checkpoint_dir: str, every_n_steps: int) -> None:
+            self.model_ref = model_ref
+            self.tokenizer_ref = tokenizer_ref
             self.checkpoint_dir = checkpoint_dir
             self.every_n_steps = every_n_steps
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             if state.global_step > 0 and state.global_step % self.every_n_steps == 0:
                 path = f"{self.checkpoint_dir}/checkpoint-{state.global_step}"
-                self.trainer_ref.save_model(path)
+                self.model_ref.save_pretrained(path)
+                self.tokenizer_ref.save_pretrained(path)
                 print(f"Saved adapter checkpoint: {path}")
 
     trainer = SFTTrainer(
@@ -122,7 +131,8 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     )
     trainer.add_callback(
         PeriodicAdapterSaveCallback(
-            trainer_ref=trainer,
+            model_ref=model,
+            tokenizer_ref=tokenizer,
             checkpoint_dir=config["checkpoint_dir"],
             every_n_steps=config["training"]["save_every_n_steps"],
         )
@@ -132,7 +142,8 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     trainer.train()
 
     final_path = f"{config['checkpoint_dir']}/final"
-    trainer.save_model(final_path)
+    model.save_pretrained(final_path)
+    tokenizer.save_pretrained(final_path)
     print(f"\nTraining complete. Final adapter saved to {final_path}")
 
     with open("train_run_summary.json", "w", encoding="utf-8") as f:
