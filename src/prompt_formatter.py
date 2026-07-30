@@ -97,6 +97,83 @@ def format_prompt(schema: dict, question: str) -> str:
     )
 
 
+def sample_rows_for_table(db_path: str, table_name: str, n_samples: int = 3) -> list[tuple]:
+    """Fetch a few sample rows from one table - for schema_to_ddl_with_samples.
+
+    NOT used by the main training/eval prompt (format_prompt) - this is
+    for a cheap, separate A/B test of whether showing example VALUES
+    (not just column structure) helps the model, per a real, documented
+    gain reported in an independent QLoRA/Spider write-up (see
+    branching_points_analysis.md and technical_lessons_learned.md).
+
+    Args:
+        db_path: Path to the .sqlite file for this example's database.
+        table_name: Original table name (from schema["table_names_original"]).
+        n_samples: How many rows to fetch (kept small - this is added to
+            the prompt, and BIRD schemas can already be long, see
+            technical_assignment.md OOM risk note).
+
+    Returns:
+        Up to `n_samples` rows as tuples, or an empty list if the table
+        is empty or the query fails for any reason (never raises - a
+        missing sample is not worth crashing an eval run over).
+    """
+    import sqlite3
+
+    try:
+        connection = sqlite3.connect(db_path)
+        rows = connection.execute(f'SELECT * FROM "{table_name}" LIMIT {n_samples}').fetchall()
+        connection.close()
+        return rows
+    except sqlite3.Error:
+        return []
+
+
+def schema_to_ddl_with_samples(schema: dict, db_path: str, n_samples: int = 3) -> str:
+    """Like schema_to_ddl, but with a few example rows appended per table
+    as `-- sample: (...)` comment lines - see sample_rows_for_table.
+
+    Kept as a SEPARATE function from schema_to_ddl (not a flag on it) so
+    the existing, already-tested DDL format used by training/baseline/
+    LoRA eval is untouched - this is only for the cheap A/B test.
+
+    Args:
+        schema: Same as schema_to_ddl.
+        db_path: Path to the .sqlite file - REQUIRED here (schema_to_ddl
+            doesn't need one, since it only uses tables.json metadata).
+        n_samples: Passed through to sample_rows_for_table.
+
+    Returns:
+        Same CREATE TABLE statements as schema_to_ddl, each followed by
+        up to `n_samples` `-- sample: (...)` comment lines with real
+        row values from that table.
+    """
+    base_ddl = schema_to_ddl(schema)
+    ddl_statements = base_ddl.split("\n")
+    table_names = schema["table_names_original"]
+
+    enriched_statements = []
+    for statement, table_name in zip(ddl_statements, table_names):
+        enriched_statements.append(statement)
+        for row in sample_rows_for_table(db_path, table_name, n_samples):
+            enriched_statements.append(f"-- sample: {row}")
+
+    return "\n".join(enriched_statements)
+
+
+def format_prompt_with_samples(schema: dict, question: str, db_path: str, n_samples: int = 3) -> str:
+    """Like format_prompt, but using schema_to_ddl_with_samples - for the
+    cheap A/B test only, not the main training/eval pipeline."""
+    ddl = schema_to_ddl_with_samples(schema, db_path, n_samples)
+    user_content = f"Schema:\n{ddl}\n\nQuestion: {question}"
+
+    return (
+        f"{CHATML_IM_START}system\n{SYSTEM_PROMPT}{CHATML_IM_END}\n"
+        f"{CHATML_IM_START}user\n{user_content}{CHATML_IM_END}\n"
+        f"{CHATML_IM_START}assistant\n"
+    )
+
+
 def _flatten_primary_keys(primary_keys: list) -> set[int]:
     """Return the set of column indices that are single-column primary keys.
 
