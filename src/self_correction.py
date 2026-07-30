@@ -28,17 +28,27 @@ CORRECTION_PROMPT_TEMPLATE = (
 def describe_failure(sql: str | None, rows: list | None) -> str | None:
     """Classify why a SQL attempt failed, for the correction prompt.
 
+    CHANGED after a real cheap test (75 hard/extra examples) showed
+    self-correction making accuracy WORSE (0.480 -> 0.453), with ZERO
+    wrong->correct flips - see technical_lessons_learned.md. The bug: an
+    empty result set (`len(rows) == 0`) was treated as a failure needing
+    correction, but a correct query legitimately CAN return zero rows
+    (e.g. "singers older than 200" - the honest answer is nothing).
+    Retrying a query that was already correct just because it happened
+    to return no rows very plausibly explains the correct->wrong
+    regressions observed. Now only genuine failure signals trigger a
+    retry - no SQL extracted, or the query didn't execute at all.
+
     Returns:
         A short, human-readable description if the attempt failed, or
-        `None` if it succeeded (rows is not None and not empty) - the
-        caller uses `None` as the signal to skip correction entirely.
+        `None` if it succeeded (rows is not None, regardless of whether
+        it's empty) - the caller uses `None` as the signal to skip
+        correction entirely.
     """
     if sql is None:
         return "no SQL query was found in your response (missing ```sql fence)"
     if rows is None:
         return "the query failed to execute (syntax error or timeout)"
-    if len(rows) == 0:
-        return "the query executed but returned zero rows - likely wrong logic"
     return None
 
 
