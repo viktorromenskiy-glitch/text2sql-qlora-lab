@@ -80,8 +80,8 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     # Import here (not at module level) - trl/transformers are GPU-only
     # deps, keeping them out of the module-level import list means this
     # file can still be *parsed* (not run) without them installed locally.
-    from transformers import TrainerCallback, TrainingArguments
-    from trl import SFTTrainer
+    from transformers import TrainerCallback
+    from trl import SFTConfig, SFTTrainer
 
     # NOTE: deliberately NOT setting save_steps/save_strategy here. HF
     # Trainer's built-in periodic checkpointing tries to torch.save() the
@@ -92,15 +92,35 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     # (confirmed on a real run - see technical_lessons_learned.md).
     # Saving adapter weights directly via model.save_pretrained() below
     # (not trainer.save_model()) sidesteps this entirely.
-    training_args = TrainingArguments(
+    #
+    # Switched TrainingArguments -> SFTConfig (a TRL subclass) to get
+    # `completion_only_loss` - added after a real run showed accuracy
+    # getting WORSE with more training steps despite falling loss (69.5%
+    # baseline -> 67.0% -> 63.0%). Literature review found this is a
+    # documented SFTTrainer gotcha: without completion-only masking, loss
+    # is computed over the ENTIRE prompt+completion text, so the model
+    # partly "learns" to reconstruct the (already-given) schema instead
+    # of concentrating on SQL generation - see technical_lessons_learned.md.
+    # Requires train_dataset to have separate prompt/completion columns
+    # (see dataset.py's build_training_examples), not a single "text" field.
+    #
+    # lr_scheduler_type/warmup_ratio added for the same reason: the
+    # comparable published result we're benchmarking against (77.2% EX,
+    # QLoRA, Llama 3 8B, full Spider train, 2 epochs) explicitly used a
+    # cosine scheduler with 0.03 warmup ratio - our earlier runs used a
+    # constant LR with no warmup at all.
+    training_args = SFTConfig(
         output_dir=config["checkpoint_dir"],
         per_device_train_batch_size=config["training"]["batch_size"],
         gradient_checkpointing=config["training"]["gradient_checkpointing"],
         num_train_epochs=config["training"]["num_epochs"],
         max_steps=config["training"].get("max_steps", -1),  # -1 = no limit, run full num_epochs
         learning_rate=config["training"]["learning_rate"],
+        lr_scheduler_type=config["training"].get("lr_scheduler_type", "cosine"),
+        warmup_ratio=config["training"].get("warmup_ratio", 0.03),
         logging_steps=config["training"]["logging_steps"],
         save_strategy="no",  # disable built-in checkpointing (see note above)
+        completion_only_loss=True,  # see note above - the main fix
         report_to="none",
     )
 
@@ -183,7 +203,9 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
         tokenizer=tokenizer,
         train_dataset=train_dataset,
         args=training_args,
-        dataset_text_field="text",
+        # No dataset_text_field - train_dataset has "prompt"/"completion"
+        # columns (see dataset.py), which SFTTrainer auto-detects and
+        # combines with completion_only_loss above for proper masking.
     )
     trainer.add_callback(
         PeriodicAdapterSaveCallback(
