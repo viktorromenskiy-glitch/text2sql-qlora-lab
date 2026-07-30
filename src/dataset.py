@@ -105,28 +105,81 @@ def get_spider_db_dir(split: str, data_dir: str = "data/spider") -> str:
 
 
 def load_bird(split: str = "dev", data_dir: str = "data/bird") -> list[dict]:
-    """Load a BIRD-SQL split as-is (native fields, including difficulty).
+    """Load a BIRD-SQL split, attaching schema per example - same shape
+    contract as `load_spider` (adds a `schema` key per example, ready for
+    `prompt_formatter.schema_to_ddl`).
+
+    IMPORTANT - schema format is UNVERIFIED against a real download.
+    Many text-to-SQL codebases process Spider and BIRD with shared
+    tooling, which suggests `dev_tables.json` likely uses the same field
+    names as Spider's `tables.json` (`table_names_original`,
+    `column_names_original`, `column_types`, `primary_keys`,
+    `foreign_keys`) - but this was not confirmed by inspecting a real
+    BIRD file (see data/README.md, technical_lessons_learned.md section
+    19: don't state unconfirmed things as fact). `_validate_bird_schema`
+    below checks for these exact keys and raises a clear, actionable
+    error immediately if they're missing, rather than silently producing
+    wrong DDL - fix the mapping in one place if the real format differs.
 
     Args:
         split: Only "dev" is currently supported - BIRD-SQL's dev split is
             the only one this project uses (held-out generalization check,
             Milestone 3, never trained on - see technical_assignment.md).
-        data_dir: Directory containing `dev.json`, per `data/README.md`.
+        data_dir: Directory containing `dev.json` and `dev_tables.json`,
+            per `data/README.md`.
 
     Returns:
-        The raw list of BIRD-SQL example dicts (`db_id`, `question`,
-        `SQL`, `evidence`, `difficulty`, ...), unmodified. No schema is
-        attached yet - see module docstring.
+        List of BIRD-SQL example dicts (`db_id`, `question`, `SQL`,
+        `evidence`, `difficulty`, ...) plus an added `schema` key per
+        example.
 
     Raises:
         ValueError: If `split` is not "dev".
+        KeyError: If `dev_tables.json`'s actual format doesn't match the
+            Spider-style keys assumed above - see error message for which
+            key is missing.
     """
     if split != "dev":
         raise ValueError(f"Unknown BIRD-SQL split '{split}', only 'dev' is supported")
 
-    data_path = Path(data_dir) / "dev.json"
-    with open(data_path, encoding="utf-8") as f:
-        return json.load(f)
+    data_path = Path(data_dir)
+    with open(data_path / "dev_tables.json", encoding="utf-8") as f:
+        tables = json.load(f)
+    for table in tables:
+        _validate_bird_schema(table)
+    schema_by_db_id = {table["db_id"]: table for table in tables}
+
+    with open(data_path / "dev.json", encoding="utf-8") as f:
+        examples = json.load(f)
+
+    for example in examples:
+        example["schema"] = schema_by_db_id[example["db_id"]]
+
+    return examples
+
+
+def _validate_bird_schema(table: dict) -> None:
+    """Fail loudly and specifically if dev_tables.json doesn't match the
+    Spider-style format assumed by load_bird() - see its docstring."""
+    required_keys = ["db_id", "table_names_original", "column_names_original", "column_types", "primary_keys", "foreign_keys"]
+    missing = [k for k in required_keys if k not in table]
+    if missing:
+        raise KeyError(
+            f"dev_tables.json is missing expected key(s) {missing} - "
+            f"BIRD's schema format may differ from Spider's assumed "
+            f"format (see load_bird docstring). Inspect a real entry "
+            f"and update this function's field mapping accordingly, "
+            f"don't guess further."
+        )
+
+
+def get_bird_db_dir(data_dir: str = "data/bird") -> str:
+    """Return the directory containing .sqlite files for BIRD dev.
+
+    Mirrors `get_spider_db_dir` - see `data/README.md` for the expected
+    layout after extracting `dev_databases.zip`.
+    """
+    return str(Path(data_dir) / "dev_databases")
 
 
 def download_spider(data_dir: str = "data/spider") -> None:
