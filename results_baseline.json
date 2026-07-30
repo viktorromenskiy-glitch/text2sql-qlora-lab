@@ -1,0 +1,10 @@
+{
+  "overall_accuracy": 0.695,
+  "accuracy_by_difficulty": {
+    "easy": 1.0,
+    "medium": 0.6547619047619048,
+    "hard": 0.7142857142857143,
+    "extra": 0.45
+  },
+  "parse_failure_rate": 0.0
+}
