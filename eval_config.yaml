@@ -1,0 +1,16 @@
+# Evaluation config - Spider only for now (BIRD-SQL added at Milestone 3,
+# see module_specifications.md "РАСХОЖДЕНИЕ" note and explanatory memo).
+sql_timeout_seconds: 10
+
+datasets:
+  spider_dev: "data/spider"  # split="dev" read from here, see src/dataset.py
+
+sample_size: 200  # matches Milestone 1/2 baseline for a fair, consistent comparison
+
+models:
+  base_model_name: "Qwen/Qwen2.5-Coder-7B-Instruct"
+  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints"
+  lora_checkpoint: "checkpoint-1500"  # update after each training run
+
+report_by_difficulty: true
+output_dir: "."  # results_baseline.json / results_lora.json written here
