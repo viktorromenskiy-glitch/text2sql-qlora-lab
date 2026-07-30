@@ -18,7 +18,7 @@ from typing import Any
 import yaml
 
 from src.dataset import build_training_examples, load_spider
-from src.model import apply_lora_config, load_base_model
+from src.model import apply_lora_config, load_base_model, load_lora_checkpoint_for_training
 from src.utils import set_seed, setup_logging
 
 
@@ -63,11 +63,16 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
     raw_examples = load_spider(config["data"]["spider_split"], data_dir=config["data"]["data_dir"])
     print(f"Loaded {len(raw_examples)} training examples")
 
-    print("Loading base model for training...")
-    model, tokenizer = load_base_model(model_name=config["model_name"])
-
-    print("Applying LoRA adapter...")
-    model = apply_lora_config(model, config["lora"])
+    resume_path = config.get("resume_from_checkpoint")
+    if resume_path:
+        print(f"Resuming from existing checkpoint: {resume_path}")
+        model, tokenizer = load_lora_checkpoint_for_training(resume_path, model_name=config["model_name"])
+        print("Loaded - adapter weights already trained, continuing (NOT applying a fresh LoRA config)")
+    else:
+        print("Loading base model for training (from scratch)...")
+        model, tokenizer = load_base_model(model_name=config["model_name"])
+        print("Applying LoRA adapter...")
+        model = apply_lora_config(model, config["lora"])
 
     print("Building tokenized training dataset...")
     train_dataset = build_training_examples(raw_examples, tokenizer)
