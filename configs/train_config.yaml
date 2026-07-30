@@ -22,17 +22,30 @@ training:
   batch_size: 4
   gradient_checkpointing: true
   num_epochs: 3
-  max_steps: 1200  # loss plateaued around step 900-1000 on the interrupted
-                    # run (see technical_lessons_learned.md) - stop with
-                    # margin past that point rather than running the full
-                    # 5250 steps for diminishing returns
-  save_every_n_steps: 100  # was 50 - too many checkpoints (105) for
-                            # available Drive space; halved given max_steps
-                            # is also much lower now (12 checkpoints total)
+  max_steps: 2000  # ADDITIONAL steps for this run, not cumulative - a
+                    # fresh Trainer's step counter starts at 0 regardless
+                    # of resume_from_checkpoint. Combined with the 1500
+                    # already done, ~3500 total steps ≈ 2 full epochs on
+                    # 7000 examples/batch_size 4 - matches a real
+                    # published QLoRA/Spider result (Llama 3 8B, 2 epochs,
+                    # 77.2% EX) found via web search after checkpoint-1500
+                    # scored below baseline (67% vs 69.5%) - see
+                    # technical_lessons_learned.md for the full reasoning:
+                    # undertraining, not overfitting, was the likely cause
+  save_every_n_steps: 100
   logging_steps: 10
 
+# Resume from an existing checkpoint instead of starting fresh - set to
+# null/omit for a from-scratch run.
+resume_from_checkpoint: "/content/drive/MyDrive/text2sql-checkpoints/checkpoint-1500"
+
 # Google Drive path - MUST be mounted before train.py runs (see RUNBOOK step 0)
-checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints"
+# NOTE: deliberately a DIFFERENT folder from the original run's
+# checkpoint-100..checkpoint-1500 (still at .../text2sql-checkpoints/) -
+# a fresh Trainer's step counter restarts at 0, so saving to the same
+# folder would collide with (and silently overwrite) the existing
+# checkpoint-100, checkpoint-200, etc.
+checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-continued"
 
 data:
   spider_split: "train"
