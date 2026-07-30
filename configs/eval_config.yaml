@@ -9,8 +9,10 @@ sample_size: 200  # matches Milestone 1/2 baseline for a fair, consistent compar
 
 models:
   base_model_name: "Qwen/Qwen2.5-Coder-7B-Instruct"
-  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints"
-  lora_checkpoint: "checkpoint-1500"  # update after each training run
+  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-continued"
+  lora_checkpoint: "final"  # completed run: 1500 (original) + 500 (resume 1) +
+                             # 1500 (resume 2, RTX PRO 6000, ~11 min) = ~3500
+                             # total steps ≈ 2 epochs
 
 report_by_difficulty: true
 output_dir: "."  # results_baseline.json / results_lora.json written here
