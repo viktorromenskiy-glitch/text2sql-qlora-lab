@@ -113,20 +113,70 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
         hit the same pickling error - see technical_lessons_learned.md).
         model.save_pretrained() goes through PEFT's own save path instead,
         which only writes adapter weights + config, never touching the
-        Trainer's args object at all."""
+        Trainer's args object at all.
 
-        def __init__(self, model_ref: Any, tokenizer_ref: Any, checkpoint_dir: str, every_n_steps: int) -> None:
+        Two fixes added after a real Colab session disconnect
+        (idle/max-duration limit) forced a second resume - see
+        technical_lessons_learned.md:
+
+        1. `step_offset`: a fresh Trainer's `state.global_step` always
+           restarts at 0, even when resuming from an existing adapter.
+           Without an offset, a second resume's checkpoint-100,
+           checkpoint-200, etc. would collide with (and silently
+           overwrite) identically-named folders from the FIRST resume
+           run, already sitting in the same checkpoint_dir. Adding the
+           already-completed step count keeps checkpoint numbers
+           globally meaningful and collision-free across any number of
+           resumes.
+
+        2. `keep_last_n`: without cleanup, checkpoints accumulate
+           forever - Google Drive free space dropped from 5GB to 2.6GB
+           over one run. Deleting old checkpoints as new ones are saved
+           (keeping only the most recent `keep_last_n`) keeps disk usage
+           roughly constant regardless of how long training runs.
+        """
+
+        def __init__(
+            self,
+            model_ref: Any,
+            tokenizer_ref: Any,
+            checkpoint_dir: str,
+            every_n_steps: int,
+            step_offset: int = 0,
+            keep_last_n: int = 3,
+        ) -> None:
             self.model_ref = model_ref
             self.tokenizer_ref = tokenizer_ref
             self.checkpoint_dir = checkpoint_dir
             self.every_n_steps = every_n_steps
+            self.step_offset = step_offset
+            self.keep_last_n = keep_last_n
+            self.saved_steps: list[int] = []
 
         def on_step_end(self, args: Any, state: Any, control: Any, **kwargs: Any) -> None:
             if state.global_step > 0 and state.global_step % self.every_n_steps == 0:
-                path = f"{self.checkpoint_dir}/checkpoint-{state.global_step}"
+                absolute_step = state.global_step + self.step_offset
+                path = f"{self.checkpoint_dir}/checkpoint-{absolute_step}"
                 self.model_ref.save_pretrained(path)
                 self.tokenizer_ref.save_pretrained(path)
                 print(f"Saved adapter checkpoint: {path}")
+
+                self.saved_steps.append(absolute_step)
+                self._cleanup_old_checkpoints()
+
+        def _cleanup_old_checkpoints(self) -> None:
+            """Delete checkpoints beyond the most recent `keep_last_n`,
+            saved by THIS run only - never touches checkpoints from
+            earlier resumes that predate step_offset, since those aren't
+            tracked in self.saved_steps."""
+            import shutil
+
+            while len(self.saved_steps) > self.keep_last_n:
+                oldest_step = self.saved_steps.pop(0)
+                old_path = Path(f"{self.checkpoint_dir}/checkpoint-{oldest_step}")
+                if old_path.exists():
+                    shutil.rmtree(old_path)
+                    print(f"Deleted old checkpoint to save space: {old_path}")
 
     trainer = SFTTrainer(
         model=model,
@@ -141,6 +191,8 @@ def main(config_path: str = "configs/train_config.yaml") -> None:
             tokenizer_ref=tokenizer,
             checkpoint_dir=config["checkpoint_dir"],
             every_n_steps=config["training"]["save_every_n_steps"],
+            step_offset=config["training"].get("step_offset", 0),
+            keep_last_n=config["training"].get("keep_last_n_checkpoints", 3),
         )
     )
 
