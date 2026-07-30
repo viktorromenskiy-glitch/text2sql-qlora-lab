@@ -238,38 +238,47 @@ def download_bird(data_dir: str = "data/bird") -> None:
 
 
 def build_training_examples(raw_data: list[dict], tokenizer: Any) -> Any:
-    """Turn loaded Spider examples into a tokenized dataset for SFTTrainer.
+    """Turn loaded Spider examples into a prompt/completion dataset for SFTTrainer.
+
+    CHANGED after a real training run showed accuracy getting WORSE with
+    more steps (69.5% baseline -> 67.0% -> 63.0% as training progressed)
+    despite loss steadily decreasing - see technical_lessons_learned.md.
+    Literature search found a well-documented cause: without explicit
+    completion-only loss masking, SFTTrainer's default `text`-field mode
+    computes loss over the ENTIRE sequence, including the schema/prompt
+    tokens - the model partly "learns" to reconstruct the (already-given,
+    deterministic) schema instead of concentrating on SQL generation,
+    which can explain falling task accuracy alongside falling loss.
+
+    Returns separate `prompt`/`completion` columns (not a single
+    concatenated `text` field) so `scripts/train.py` can enable
+    `completion_only_loss=True` in `SFTConfig` - TRL only supports proper
+    masking with this dataset shape, not with a pre-concatenated string.
 
     Args:
         raw_data: Output of `load_spider` - each example must already have
             a `schema` key (see `load_spider`).
         tokenizer: A HuggingFace tokenizer (e.g. from
-            `model.load_base_model`), called on each full prompt+target
-            string. Only `tokenizer(text)` returning a dict with
-            `input_ids` is required, so this also works with any
-            tokenizer-like stub for local testing.
+            `model.load_base_model`). Only used here to keep the same
+            function signature as before local testing still works with a
+            tokenizer-like stub; SFTTrainer does its own tokenization
+            internally when given prompt/completion columns.
 
     Returns:
-        A `datasets.Dataset` with `text`, `input_ids`, and
-        `attention_mask` columns, ready for `SFTTrainer`. The target
-        appended after the prompt is the gold SQL wrapped in the same
+        A `datasets.Dataset` with `prompt` and `completion` string
+        columns. The completion is the gold SQL wrapped in the same
         ```sql fence the model is instructed to produce (see
         `prompt_formatter.SYSTEM_PROMPT`), so training teaches the exact
         output format `sanitizer.extract_sql` expects at inference time.
     """
     from datasets import Dataset  # local import: heavy, only needed here
 
-    texts = []
+    prompts = []
+    completions = []
     for example in raw_data:
         prompt = format_prompt(example["schema"], example["question"])
-        target = f"```sql\n{example['query']}\n```{CHATML_IM_END}"
-        texts.append(prompt + target)
+        completion = f"```sql\n{example['query']}\n```{CHATML_IM_END}"
+        prompts.append(prompt)
+        completions.append(completion)
 
-    encodings = tokenizer(texts)
-    return Dataset.from_dict(
-        {
-            "text": texts,
-            "input_ids": encodings["input_ids"],
-            "attention_mask": encodings["attention_mask"],
-        }
-    )
+    return Dataset.from_dict({"prompt": prompts, "completion": completions})
