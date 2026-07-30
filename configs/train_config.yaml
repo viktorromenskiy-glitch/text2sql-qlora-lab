@@ -21,34 +21,31 @@ training:
   learning_rate: 2.0e-4
   batch_size: 4
   gradient_checkpointing: true
-  num_epochs: 3
-  max_steps: 1500  # REMAINING additional steps for this (third) run.
-                    # Already done: 1500 (original) + 500 (first resume,
-                    # saved as checkpoint-500 in -continued right before
-                    # a session disconnect) = 2000 total. Target ~3500
-                    # total (≈2 epochs) -> 1500 more needed this run.
-  save_every_n_steps: 100
+  num_epochs: 2  # ~3500 steps on 7000 examples/batch_size 4 - matches
+                  # the published reference result (Llama 3 8B, QLoRA,
+                  # full Spider train, 2 epochs, 77.2% EX)
+  lr_scheduler_type: cosine  # was constant (no schedule at all) - the
+                              # published reference used cosine + 0.03
+                              # warmup; our earlier runs used flat 2e-4
+                              # the whole time, no warmup
+  warmup_ratio: 0.03
+  save_every_n_steps: 200
   logging_steps: 10
-  step_offset: 2000  # Already-completed steps before this run starts -
-                      # added to checkpoint numbers so they stay globally
-                      # unique across resumes (this run's internal step
-                      # 100 is saved as checkpoint-2100, not
-                      # checkpoint-100 - avoids colliding with the
-                      # existing checkpoint-100..500 in the SAME
-                      # checkpoint_dir from the previous resume)
-  keep_last_n_checkpoints: 3  # auto-delete older checkpoints saved by
-                               # THIS run - Drive free space dropped
-                               # 5GB->2.6GB from unbounded accumulation
+  keep_last_n_checkpoints: 3
 
-# Resume from the LATEST confirmed-saved checkpoint - updated after each
-# session disconnect. Currently: checkpoint-500 from the first resume
-# (saved successfully right before an idle/max-duration disconnect).
-resume_from_checkpoint: "/content/drive/MyDrive/text2sql-checkpoints-continued/checkpoint-500"
+# Explicitly NOT resuming this time - training from scratch in ONE
+# continuous run. A real GitHub issue (modelscope/ms-swift #6008) and
+# our own three-part resume history both point to resumed runs silently
+# losing optimizer/scheduler state (AdamW momentum resets to zero,
+# learning rate jumps back to full value with no warmup at each resume
+# point) - a plausible contributor to accuracy getting worse with more
+# training. Now that the RTX PRO 6000 makes a full run cheap (~15-20 min,
+# ~2-3 compute units), avoiding resumes entirely removes this variable.
+resume_from_checkpoint: null
 
-# Google Drive path - MUST be mounted before train.py runs (see RUNBOOK step 0)
-# Reusing the SAME "-continued" folder as the previous run is now safe -
-# step_offset (above) keeps checkpoint numbers from colliding.
-checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-continued"
+# Google Drive path - NEW folder for this corrected run, kept separate
+# from the previous (flawed) run's checkpoints for honest comparison.
+checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-v2"
 
 data:
   spider_split: "train"
