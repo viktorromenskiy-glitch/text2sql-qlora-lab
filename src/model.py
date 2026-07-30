@@ -86,3 +86,35 @@ def apply_lora_config(model: Any, config: dict) -> Any:
         target_modules=config["target_modules"],
         use_gradient_checkpointing=True,
     )
+
+
+def load_lora_checkpoint_for_training(checkpoint_path: str, model_name: str = "Qwen/Qwen2.5-Coder-7B-Instruct") -> tuple[Any, Any]:
+    """Load an existing LoRA adapter checkpoint, kept TRAINABLE - for
+    continuing/resuming training, not evaluation.
+
+    Deliberately distinct from `load_lora_model()`: that one calls
+    `FastLanguageModel.for_inference(model)`, which puts the model in a
+    mode unsuitable for further training (real risk found while
+    extending training past checkpoint-1500 - see
+    technical_lessons_learned.md). This function skips that call, so
+    the loaded adapter's weights remain trainable.
+
+    Args:
+        checkpoint_path: Path to a LoRA adapter saved by `scripts/train.py`.
+        model_name: Base model id - must match what the adapter was
+            trained against.
+
+    Returns:
+        A `(model, tokenizer)` pair with the LoRA adapter applied, ready
+        to pass into `SFTTrainer` for further training.
+    """
+    from unsloth import FastLanguageModel
+
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name=checkpoint_path,
+        max_seq_length=MAX_SEQ_LENGTH,
+        dtype=None,
+        load_in_4bit=True,
+    )
+    # Deliberately NOT calling for_inference() here - see docstring.
+    return model, tokenizer
