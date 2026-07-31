@@ -110,7 +110,16 @@ SQL_KEYWORDS = {
 # Table aliases (T1, T2, ...) are extremely common in Spider/BIRD gold
 # SQL - must not be "corrected" into a column name by accident.
 ALIAS_PATTERN = re.compile(r"^T\d+$", re.IGNORECASE)
-IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+# CRITICAL FIX (found via find_postprocessing_regressions.py on a real
+# run: 'USA' was being "corrected" to 'uid', 'UAL' to 'uid' - 6 real
+# regressions on previously-correct examples): the identifier pattern
+# alone can't distinguish a bare identifier from the CONTENTS of a
+# single-quoted string literal ('USA' contains the letters U-S-A, which
+# look like a candidate identifier if matched in isolation). Fixed by
+# matching quoted strings as a whole (and leaving them untouched)
+# alongside identifiers, in one pass, so string contents are never
+# individually examined - see technical_lessons_learned.md.
+IDENTIFIER_OR_STRING_PATTERN = re.compile(r"'[^']*'|\b[A-Za-z_][A-Za-z0-9_]*\b")
 
 
 def correct_column_names(sql: str, schema: dict) -> str:
@@ -126,7 +135,10 @@ def correct_column_names(sql: str, schema: dict) -> str:
        legitimate SQL that just happens to share a similar-looking word.
 
     Does NOT touch: SQL keywords, table names (see correct_table_names),
-    table aliases (T1, T2, ...), or identifiers already exactly correct.
+    table aliases (T1, T2, ...), identifiers already exactly correct, or
+    the CONTENTS of single-quoted string literals (see
+    IDENTIFIER_OR_STRING_PATTERN - a real, found-in-production bug where
+    'USA' was corrupted to 'uid').
 
     Args:
         sql: The generated SQL query.
@@ -146,6 +158,10 @@ def correct_column_names(sql: str, schema: dict) -> str:
 
     def replace_identifier(match: re.Match) -> str:
         identifier = match.group(0)
+
+        if identifier.startswith("'"):
+            return identifier  # matched a whole string literal - leave untouched entirely
+
         identifier_lower = identifier.lower()
 
         if identifier.upper() in SQL_KEYWORDS or ALIAS_PATTERN.match(identifier):
@@ -163,7 +179,7 @@ def correct_column_names(sql: str, schema: dict) -> str:
             return closest_name
         return identifier  # not confident enough - leave untouched
 
-    return IDENTIFIER_PATTERN.sub(replace_identifier, sql)
+    return IDENTIFIER_OR_STRING_PATTERN.sub(replace_identifier, sql)
 
 
 DOUBLE_QUOTED_STRING = re.compile(r'"([^"]*)"')
