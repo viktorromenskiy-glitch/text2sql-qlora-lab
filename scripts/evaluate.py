@@ -24,6 +24,7 @@ from src.dataset import get_spider_db_dir, load_spider
 from src.evaluator import aggregate_results, evaluate_example
 from src.prompt_formatter import format_prompt
 from src.sanitizer import extract_sql
+from src.sql_postprocess import correct_column_names, correct_table_names, normalize_string_quotes
 from src.utils import set_seed, setup_logging
 
 
@@ -47,11 +48,21 @@ def load_sample(config: dict[str, Any]) -> tuple[list[dict], str]:
     return examples, db_dir
 
 
-def run_eval(model: Any, tokenizer: Any, examples: list[dict], db_dir: str, timeout: int) -> dict:
+def run_eval(model: Any, tokenizer: Any, examples: list[dict], db_dir: str, timeout: int, use_postprocessing: bool = False) -> dict:
     """Run one model over the fixed sample, return aggregated metrics.
 
     Shared by both the baseline and LoRA passes - the only thing that
     differs between calls is which (model, tokenizer) pair is passed in.
+
+    Args:
+        use_postprocessing: if True, applies correct_table_names,
+            correct_column_names, and normalize_string_quotes to the
+            extracted SQL before scoring - see sql_postprocess.py and
+            technical_lessons_learned.md (Priority 1, "Deterministic
+            Execution Guard"). Defaults to False so baseline/earlier
+            LoRA numbers remain reproducible without this flag - always
+            pass explicitly, don't rely on the default silently changing
+            results between runs.
     """
     results = []
     for i, example in enumerate(examples):
@@ -61,6 +72,11 @@ def run_eval(model: Any, tokenizer: Any, examples: list[dict], db_dir: str, time
         raw_output = tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
 
         predicted_sql = extract_sql(raw_output)
+        if use_postprocessing and predicted_sql is not None:
+            predicted_sql = correct_table_names(predicted_sql, example["schema"]["table_names_original"])
+            predicted_sql = correct_column_names(predicted_sql, example["schema"])
+            predicted_sql = normalize_string_quotes(predicted_sql, example["schema"])
+
         db_path = f"{db_dir}/{example['db_id']}/{example['db_id']}.sqlite"
         results.append(evaluate_example(
             predicted_sql=predicted_sql,
@@ -90,11 +106,20 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/eval_config.yaml")
     parser.add_argument("--model", choices=["baseline", "lora", "both"], default="both")
+    parser.add_argument(
+        "--postprocess",
+        action="store_true",
+        help="Apply correct_table_names/correct_column_names/normalize_string_quotes "
+        "before scoring - see technical_lessons_learned.md, Priority 1 (Execution Guard). "
+        "Off by default so past results (results_baseline.json, results_lora.json without "
+        "this flag) remain directly comparable unless explicitly re-run with it.",
+    )
     args = parser.parse_args()
 
     setup_logging()
     config = load_config(args.config)
     print(f"Loaded config: {config}")
+    print(f"Post-processing (Levenshtein/case/quote fixes): {'ON' if args.postprocess else 'OFF'}")
 
     examples, db_dir = load_sample(config)
     print(f"Evaluating on {len(examples)} examples (fixed sample, seed=42)")
@@ -104,15 +129,20 @@ def main() -> None:
     baseline_result = None
     lora_result = None
 
+    # Suffix output filenames when postprocessing is on, so the existing
+    # results_baseline.json/results_lora.json (without postprocessing)
+    # aren't silently overwritten - keeps both available for comparison.
+    suffix = "_postprocessed" if args.postprocess else ""
+
     if args.model in ("baseline", "both"):
         from src.model import load_base_model  # local import - GPU-only dep
 
         print("Loading base model...")
         model, tokenizer = load_base_model(model_name=config["models"]["base_model_name"])
-        baseline_result = run_eval(model, tokenizer, examples, db_dir, timeout)
+        baseline_result = run_eval(model, tokenizer, examples, db_dir, timeout, use_postprocessing=args.postprocess)
         print("\n=== BASELINE (zero-shot) RESULTS ===")
         print(json.dumps(baseline_result, indent=2))
-        with open(f"{output_dir}/results_baseline.json", "w", encoding="utf-8") as f:
+        with open(f"{output_dir}/results_baseline{suffix}.json", "w", encoding="utf-8") as f:
             json.dump(baseline_result, f, indent=2)
         del model  # free VRAM before loading the second model, if running "both"
 
@@ -122,10 +152,10 @@ def main() -> None:
         checkpoint_path = f"{config['models']['lora_checkpoint_dir']}/{config['models']['lora_checkpoint']}"
         print(f"Loading LoRA model from {checkpoint_path}...")
         model, tokenizer = load_lora_model(checkpoint_path, model_name=config["models"]["base_model_name"])
-        lora_result = run_eval(model, tokenizer, examples, db_dir, timeout)
+        lora_result = run_eval(model, tokenizer, examples, db_dir, timeout, use_postprocessing=args.postprocess)
         print("\n=== LoRA (fine-tuned) RESULTS ===")
         print(json.dumps(lora_result, indent=2))
-        with open(f"{output_dir}/results_lora.json", "w", encoding="utf-8") as f:
+        with open(f"{output_dir}/results_lora{suffix}.json", "w", encoding="utf-8") as f:
             json.dump(lora_result, f, indent=2)
 
     if baseline_result is None and args.model == "lora":
