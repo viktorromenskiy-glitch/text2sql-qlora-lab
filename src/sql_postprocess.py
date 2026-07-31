@@ -90,3 +90,114 @@ def correct_table_names(sql: str, real_table_names: list[str]) -> str:
         return f"{keyword} {closest_name}"
 
     return TABLE_REFERENCE_PATTERN.sub(replace_match, sql)
+
+
+# Real, documented failure mode found via diagnose_errors.py on our own
+# LoRA model (16 sqlite_execution_error cases inspected by hand - see
+# technical_lessons_learned.md): the model generates plausible-looking
+# but wrong-case/wrong-format column names (PetAge vs pet_age, StuID vs
+# stuid) - a DIFFERENT, separate failure mode from table-name
+# hallucination. Not every SQL keyword/alias should be treated as a
+# candidate column - this list is deliberately conservative (Spider/BIRD
+# gold queries don't use exotic SQL features).
+SQL_KEYWORDS = {
+    "SELECT", "FROM", "WHERE", "JOIN", "ON", "AND", "OR", "NOT", "AS",
+    "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "DISTINCT", "ASC", "DESC",
+    "IN", "LIKE", "IS", "NULL", "BETWEEN", "EXISTS", "UNION", "EXCEPT",
+    "INTERSECT", "INNER", "LEFT", "RIGHT", "OUTER", "COUNT", "AVG",
+    "MIN", "MAX", "SUM", "CASE", "WHEN", "THEN", "ELSE", "END", "ALL",
+}
+# Table aliases (T1, T2, ...) are extremely common in Spider/BIRD gold
+# SQL - must not be "corrected" into a column name by accident.
+ALIAS_PATTERN = re.compile(r"^T\d+$", re.IGNORECASE)
+IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+
+
+def correct_column_names(sql: str, schema: dict) -> str:
+    """Replace hallucinated/miscased column names with the closest real one.
+
+    Two-pass, conservative approach:
+    1. Exact case-insensitive match (e.g. "StuID" -> "stuid") - safe,
+       handles most cases observed in practice (see diagnose_errors.py
+       findings, technical_lessons_learned.md).
+    2. Levenshtein fallback ONLY for identifiers within a small edit
+       distance of a real column (e.g. "PetAge" -> "pet_age", distance 1)
+       - deliberately conservative threshold to avoid corrupting
+       legitimate SQL that just happens to share a similar-looking word.
+
+    Does NOT touch: SQL keywords, table names (see correct_table_names),
+    table aliases (T1, T2, ...), or identifiers already exactly correct.
+
+    Args:
+        sql: The generated SQL query.
+        schema: This example's schema entry (needs
+            `column_names_original`, same format as `schema_to_ddl`).
+
+    Returns:
+        The SQL with column-name identifiers corrected where a confident
+        match was found. Unchanged if no correction was needed/possible.
+    """
+    real_column_names = [name for _, name in schema["column_names_original"] if name != "*"]
+    if not real_column_names:
+        return sql
+
+    real_names_lower = {name.lower(): name for name in real_column_names}
+    table_names_lower = {name.lower() for name in schema.get("table_names_original", [])}
+
+    def replace_identifier(match: re.Match) -> str:
+        identifier = match.group(0)
+        identifier_lower = identifier.lower()
+
+        if identifier.upper() in SQL_KEYWORDS or ALIAS_PATTERN.match(identifier):
+            return identifier
+        if identifier_lower in table_names_lower:
+            return identifier  # let correct_table_names handle these separately
+        if identifier_lower in real_names_lower:
+            return real_names_lower[identifier_lower]  # exact case-insensitive fix
+
+        closest_name = min(real_column_names, key=lambda c: levenshtein_distance(identifier_lower, c.lower()))
+        distance = levenshtein_distance(identifier_lower, closest_name.lower())
+        # Conservative threshold: only correct if genuinely close (e.g.
+        # "PetAge"->"pet_age" is distance 1) - not confident guesses.
+        if distance <= 2 and distance < len(identifier_lower):
+            return closest_name
+        return identifier  # not confident enough - leave untouched
+
+    return IDENTIFIER_PATTERN.sub(replace_identifier, sql)
+
+
+DOUBLE_QUOTED_STRING = re.compile(r'"([^"]*)"')
+
+
+def normalize_string_quotes(sql: str, schema: dict) -> str:
+    """Convert double-quoted VALUE literals to single quotes.
+
+    Real, observed failure mode (diagnose_errors.py): the model sometimes
+    writes `WHERE pet_type = "cat"` - in SQLite, double quotes denote an
+    IDENTIFIER, not a string literal, so this raises "no such column:
+    cat" at execution time, not a logic error - a purely mechanical fix.
+
+    Only converts quotes whose content does NOT match a real table/column
+    name (case-insensitive) - genuine double-quoted identifiers (rare,
+    but valid SQL) are left untouched, since those aren't the bug.
+
+    Args:
+        sql: The generated SQL query.
+        schema: This example's schema entry - used to distinguish
+            legitimate double-quoted identifiers from mistaken value
+            literals.
+
+    Returns:
+        The SQL with likely-mistaken double-quoted values converted to
+        single quotes. Unchanged if no such case is found.
+    """
+    known_identifiers = {name.lower() for _, name in schema["column_names_original"] if name != "*"}
+    known_identifiers |= {name.lower() for name in schema.get("table_names_original", [])}
+
+    def replace_quotes(match: re.Match) -> str:
+        content = match.group(1)
+        if content.lower() in known_identifiers:
+            return match.group(0)  # genuine identifier reference - leave as-is
+        return f"'{content}'"
+
+    return DOUBLE_QUOTED_STRING.sub(replace_quotes, sql)
