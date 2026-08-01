@@ -24,6 +24,7 @@ from src.dataset import get_spider_db_dir, load_spider
 from src.evaluator import aggregate_results, evaluate_example
 from src.prompt_formatter import CHATML_IM_END, format_prompt
 from src.sanitizer import extract_sql
+from src.schema_pruning import prune_schema
 from src.sql_postprocess import correct_column_names, correct_table_names, normalize_string_quotes
 from src.utils import set_seed, setup_logging
 from src.value_retrieval import find_value_hints
@@ -57,6 +58,7 @@ def run_eval(
     timeout: int,
     use_postprocessing: bool = False,
     use_value_retrieval: bool = False,
+    use_schema_pruning: bool = False,
 ) -> dict:
     """Run one model over the fixed sample, return aggregated metrics.
 
@@ -73,19 +75,30 @@ def run_eval(
             value mentions and injects hints about matching real DB
             content into the prompt BEFORE generation - see
             value_retrieval.py, implementation_priority_plan.md Priority 2.
-            Independent flag from use_postprocessing - kept separate so
-            each technique's effect can be measured in isolation (see
-            technical_lessons_learned.md on cheap, isolated testing).
-        Both default to False so baseline/earlier LoRA numbers remain
+        use_schema_pruning: if True, removes low-relevance tables from
+            the schema shown in the prompt (wide schemas only - see
+            schema_pruning.py, implementation_priority_plan.md Priority
+            3). Applied BEFORE building the prompt and BEFORE value
+            retrieval (so hints are only searched within the tables the
+            model actually sees) - but postprocessing correction below
+            still uses the FULL original schema (example["schema"]), not
+            the pruned one, since a hallucinated reference to a pruned
+            table should still be correctable against the real schema.
+        All three default to False so baseline/earlier results remain
         reproducible without these flags - always pass explicitly.
     """
     results = []
     for i, example in enumerate(examples):
         db_path = f"{db_dir}/{example['db_id']}/{example['db_id']}.sqlite"
-        prompt = format_prompt(example["schema"], example["question"])
+
+        prompt_schema = example["schema"]
+        if use_schema_pruning:
+            prompt_schema = prune_schema(prompt_schema, example["question"])
+
+        prompt = format_prompt(prompt_schema, example["question"])
 
         if use_value_retrieval:
-            hints = find_value_hints(example["question"], example["schema"], db_path)
+            hints = find_value_hints(example["question"], prompt_schema, db_path)
             if hints:
                 # Insert hints right before the closing of the user turn
                 # (last CHATML_IM_END before the open assistant turn) -
@@ -101,6 +114,8 @@ def run_eval(
 
         predicted_sql = extract_sql(raw_output)
         if use_postprocessing and predicted_sql is not None:
+            # Deliberately uses the FULL original schema, not prompt_schema -
+            # see docstring note on use_schema_pruning above.
             predicted_sql = correct_table_names(predicted_sql, example["schema"]["table_names_original"])
             predicted_sql = correct_column_names(predicted_sql, example["schema"])
             predicted_sql = normalize_string_quotes(predicted_sql, example["schema"])
@@ -149,6 +164,13 @@ def main() -> None:
         "Independent of --postprocess - combine both flags to test them together, or run "
         "separately first to measure each effect in isolation.",
     )
+    parser.add_argument(
+        "--schema-pruning",
+        action="store_true",
+        help="Remove low-relevance tables from wide schemas before building the prompt - "
+        "see schema_pruning.py, implementation_priority_plan.md Priority 3. Independent flag, "
+        "combine with the others or run alone to measure its effect in isolation.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -156,6 +178,7 @@ def main() -> None:
     print(f"Loaded config: {config}")
     print(f"Post-processing (Levenshtein/case/quote fixes): {'ON' if args.postprocess else 'OFF'}")
     print(f"Value retrieval (DB-content hints): {'ON' if args.value_retrieval else 'OFF'}")
+    print(f"Schema pruning (wide schemas only): {'ON' if args.schema_pruning else 'OFF'}")
 
     examples, db_dir = load_sample(config)
     print(f"Evaluating on {len(examples)} examples (fixed sample, seed=42)")
@@ -173,6 +196,8 @@ def main() -> None:
         suffix_parts.append("postprocessed")
     if args.value_retrieval:
         suffix_parts.append("valueretrieval")
+    if args.schema_pruning:
+        suffix_parts.append("schemapruning")
     suffix = ("_" + "_".join(suffix_parts)) if suffix_parts else ""
 
     if args.model in ("baseline", "both"):
@@ -183,6 +208,7 @@ def main() -> None:
         baseline_result = run_eval(
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
+            use_schema_pruning=args.schema_pruning,
         )
         print("\n=== BASELINE (zero-shot) RESULTS ===")
         print(json.dumps(baseline_result, indent=2))
@@ -199,6 +225,7 @@ def main() -> None:
         lora_result = run_eval(
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
+            use_schema_pruning=args.schema_pruning,
         )
         print("\n=== LoRA (fine-tuned) RESULTS ===")
         print(json.dumps(lora_result, indent=2))
