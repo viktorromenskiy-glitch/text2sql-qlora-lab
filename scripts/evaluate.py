@@ -24,7 +24,7 @@ from src.advanced_self_correction import generate_n_candidates, majority_vote
 from src.dataset import get_spider_db_dir, load_spider
 from src.evaluator import aggregate_results, evaluate_example, execute_sql
 from src.few_shot import find_similar_examples, format_few_shot_block
-from src.prompt_formatter import CHATML_IM_END, format_prompt
+from src.prompt_formatter import CHATML_IM_END, format_prompt, format_prompt_with_samples
 from src.sanitizer import extract_sql
 from src.schema_pruning import prune_schema
 from src.sql_postprocess import correct_column_names, correct_table_names, normalize_string_quotes
@@ -64,6 +64,7 @@ def run_eval(
     train_examples: list[dict] | None = None,
     use_advanced_correction: bool = False,
     n_candidates: int = 5,
+    use_sample_values: bool = False,
 ) -> dict:
     """Run one model over the fixed sample, return aggregated metrics.
 
@@ -107,6 +108,17 @@ def run_eval(
             per-candidate correction, not raw model output.
         n_candidates: how many sampled candidates per example when
             use_advanced_correction is True - ignored otherwise.
+        use_sample_values: if True, uses format_prompt_with_samples
+            instead of format_prompt - shows a few (default 3) example
+            ROWS per table unconditionally, regardless of the question
+            (see prompt_formatter.py). DIFFERENT from use_value_retrieval:
+            that does a TARGETED lookup of words from the question
+            against real DB values; this shows general sample rows
+            always. Written early in this project, tested once on the
+            base (non-fine-tuned) model only with a since-identified
+            sampling-bias flaw - never evaluated on a fine-tuned
+            checkpoint until now. Mutually independent of every other
+            flag - combine or isolate freely.
         All boolean flags default to False so baseline/earlier results
         remain reproducible without them - always pass explicitly.
     """
@@ -118,7 +130,10 @@ def run_eval(
         if use_schema_pruning:
             prompt_schema = prune_schema(prompt_schema, example["question"])
 
-        prompt = format_prompt(prompt_schema, example["question"])
+        if use_sample_values:
+            prompt = format_prompt_with_samples(prompt_schema, example["question"], db_path)
+        else:
+            prompt = format_prompt(prompt_schema, example["question"])
 
         if train_examples:
             similar = find_similar_examples(example["question"], train_examples, k=2)
@@ -234,6 +249,14 @@ def main() -> None:
         "5. EXPENSIVE (5x generation cost). Different from the already-tested, rejected "
         "simple self_correction.py (single retry, 0 effect) - see technical_lessons_learned.md.",
     )
+    parser.add_argument(
+        "--sample-values",
+        action="store_true",
+        help="Show a few example ROWS per table in the schema unconditionally (not "
+        "question-targeted like --value-retrieval) - see prompt_formatter.py's "
+        "format_prompt_with_samples. Written early in the project, never tested on a "
+        "fine-tuned checkpoint before. Independent of every other flag.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -244,6 +267,7 @@ def main() -> None:
     print(f"Schema pruning (wide schemas only): {'ON' if args.schema_pruning else 'OFF'}")
     print(f"Few-shot (2 similar train examples): {'ON' if args.few_shot else 'OFF'}")
     print(f"Advanced self-correction (5-candidate voting): {'ON' if args.advanced_self_correction else 'OFF'}")
+    print(f"Sample values (general rows per table): {'ON' if args.sample_values else 'OFF'}")
 
     examples, db_dir = load_sample(config)
     print(f"Evaluating on {len(examples)} examples (fixed sample, seed=42)")
@@ -273,6 +297,8 @@ def main() -> None:
         suffix_parts.append("fewshot")
     if args.advanced_self_correction:
         suffix_parts.append("advcorrection")
+    if args.sample_values:
+        suffix_parts.append("samplevalues")
     suffix = ("_" + "_".join(suffix_parts)) if suffix_parts else ""
 
     if args.model in ("baseline", "both"):
@@ -284,7 +310,7 @@ def main() -> None:
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
             use_schema_pruning=args.schema_pruning, train_examples=train_examples,
-            use_advanced_correction=args.advanced_self_correction,
+            use_advanced_correction=args.advanced_self_correction, use_sample_values=args.sample_values,
         )
         print("\n=== BASELINE (zero-shot) RESULTS ===")
         print(json.dumps(baseline_result, indent=2))
@@ -302,7 +328,7 @@ def main() -> None:
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
             use_schema_pruning=args.schema_pruning, train_examples=train_examples,
-            use_advanced_correction=args.advanced_self_correction,
+            use_advanced_correction=args.advanced_self_correction, use_sample_values=args.sample_values,
         )
         print("\n=== LoRA (fine-tuned) RESULTS ===")
         print(json.dumps(lora_result, indent=2))
