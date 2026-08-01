@@ -21,31 +21,24 @@ training:
   learning_rate: 2.0e-4
   batch_size: 4
   gradient_checkpointing: true
-  num_epochs: 2  # ~3500 steps on 7000 examples/batch_size 4 - matches
-                  # the published reference result (Llama 3 8B, QLoRA,
-                  # full Spider train, 2 epochs, 77.2% EX)
-  lr_scheduler_type: cosine  # was constant (no schedule at all) - the
-                              # published reference used cosine + 0.03
-                              # warmup; our earlier runs used flat 2e-4
-                              # the whole time, no warmup
+  num_epochs: 1  # EPOCH SWEEP EXPERIMENT - was 2 (gave 0.700 pure SFT EX,
+                  # our best/only result so far). Never independently
+                  # verified 2 is optimal FOR OUR model - the reference
+                  # work that got 77.2% swept 1-5 epochs and found 2 best
+                  # for THEIRS (Llama 3 8B), we just copied their choice
+                  # without our own sweep. Testing 1 and 3 to check.
+  lr_scheduler_type: cosine
   warmup_ratio: 0.03
   save_every_n_steps: 200
   logging_steps: 10
   keep_last_n_checkpoints: 3
 
-# Explicitly NOT resuming this time - training from scratch in ONE
-# continuous run. A real GitHub issue (modelscope/ms-swift #6008) and
-# our own three-part resume history both point to resumed runs silently
-# losing optimizer/scheduler state (AdamW momentum resets to zero,
-# learning rate jumps back to full value with no warmup at each resume
-# point) - a plausible contributor to accuracy getting worse with more
-# training. Now that the RTX PRO 6000 makes a full run cheap (~15-20 min,
-# ~2-3 compute units), avoiding resumes entirely removes this variable.
 resume_from_checkpoint: null
 
-# Google Drive path - NEW folder for this corrected run, kept separate
-# from the previous (flawed) run's checkpoints for honest comparison.
-checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-v2"
+# NEW folder for this experiment - keeps the existing best checkpoint
+# (checkpoints-v2, 2 epochs, 0.700 pure SFT / 0.740 with all techniques)
+# untouched and safe.
+checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-1epoch"
 
 data:
   spider_split: "train"
