@@ -2,8 +2,10 @@
 model_name: "Qwen/Qwen2.5-Coder-7B-Instruct"
 
 lora:
-  r: 16
-  alpha: 32
+  r: 32  # LORA RANK/ALPHA SWEEP - was r=16 always, never varied. Doubling
+          # capacity to see if it helps or overfits faster. alpha kept at
+          # 2x r ratio (matches our original r=16/alpha=32 ratio).
+  alpha: 64
   target_modules:
     - q_proj
     - k_proj
@@ -21,9 +23,8 @@ training:
   learning_rate: 2.0e-4
   batch_size: 4
   gradient_checkpointing: true
-  num_epochs: 4  # EPOCH SWEEP, part 3. Trend so far: 1ep=0.665,
-                  # 2ep=0.700, 3ep=0.735 - still rising, not plateaued -
-                  # worth checking 4 before assuming 3 is near-optimal.
+  num_epochs: 3  # FIXED at our proven optimum from the epoch sweep -
+                  # only varying rank/alpha this time, not re-testing epochs.
   lr_scheduler_type: cosine
   warmup_ratio: 0.03
   save_every_n_steps: 200
@@ -32,7 +33,7 @@ training:
 
 resume_from_checkpoint: null
 
-checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-4epoch"
+checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-r32"
 
 data:
   spider_split: "train"
