@@ -21,12 +21,10 @@ training:
   learning_rate: 2.0e-4
   batch_size: 4
   gradient_checkpointing: true
-  num_epochs: 1  # EPOCH SWEEP EXPERIMENT - was 2 (gave 0.700 pure SFT EX,
-                  # our best/only result so far). Never independently
-                  # verified 2 is optimal FOR OUR model - the reference
-                  # work that got 77.2% swept 1-5 epochs and found 2 best
-                  # for THEIRS (Llama 3 8B), we just copied their choice
-                  # without our own sweep. Testing 1 and 3 to check.
+  num_epochs: 3  # EPOCH SWEEP EXPERIMENT, part 2. 1 epoch gave 0.665
+                  # (worse than baseline 0.695), 2 epochs gave 0.700
+                  # (best so far) - checking if 3 continues improving,
+                  # plateaus, or starts overfitting.
   lr_scheduler_type: cosine
   warmup_ratio: 0.03
   save_every_n_steps: 200
@@ -35,10 +33,7 @@ training:
 
 resume_from_checkpoint: null
 
-# NEW folder for this experiment - keeps the existing best checkpoint
-# (checkpoints-v2, 2 epochs, 0.700 pure SFT / 0.740 with all techniques)
-# untouched and safe.
-checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-1epoch"
+checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-3epoch"
 
 data:
   spider_split: "train"
