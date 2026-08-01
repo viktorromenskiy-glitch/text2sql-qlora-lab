@@ -102,7 +102,15 @@ def find_value_hints(question: str, schema: dict, db_path: str, max_hints: int =
                 except sqlite3.Error:
                     continue
                 if row is not None:
-                    hints.append(f'Note: value "{row[0]}" was found in table "{table_name}", column "{column_name}".')
+                    # Value itself in single quotes (matches SQLite string
+                    # literal convention) - table/column names still in
+                    # double quotes (SQLite identifier convention). Found
+                    # via a real regression: double-quoting the VALUE here
+                    # apparently primed the model to also generate
+                    # double-quoted string literals in its SQL, which
+                    # collided with a (since-fixed) bug in
+                    # correct_column_names - see technical_lessons_learned.md.
+                    hints.append(f"Note: value '{row[0]}' was found in table \"{table_name}\", column \"{column_name}\".")
         connection.close()
     except sqlite3.Error:
         return []
