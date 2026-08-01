@@ -114,12 +114,20 @@ ALIAS_PATTERN = re.compile(r"^T\d+$", re.IGNORECASE)
 # run: 'USA' was being "corrected" to 'uid', 'UAL' to 'uid' - 6 real
 # regressions on previously-correct examples): the identifier pattern
 # alone can't distinguish a bare identifier from the CONTENTS of a
-# single-quoted string literal ('USA' contains the letters U-S-A, which
-# look like a candidate identifier if matched in isolation). Fixed by
-# matching quoted strings as a whole (and leaving them untouched)
-# alongside identifiers, in one pass, so string contents are never
-# individually examined - see technical_lessons_learned.md.
-IDENTIFIER_OR_STRING_PATTERN = re.compile(r"'[^']*'|\b[A-Za-z_][A-Za-z0-9_]*\b")
+# quoted string literal ('USA' or "USA" both contain the letters U-S-A,
+# which look like a candidate identifier if matched in isolation). Fixed
+# by matching quoted strings (both quote styles) as a whole and leaving
+# them untouched, alongside identifiers, in one pass, so string contents
+# are never individually examined.
+#
+# SECOND occurrence of this exact bug class (found via
+# find_vr_regression.py on a real run): the FIRST fix only handled
+# single-quoted strings ('...'), not double-quoted ("...") - SQLite
+# gold queries sometimes use double quotes for string literals (not
+# just for identifiers, despite that being the "correct" SQL standard
+# meaning), and the model does too. 'USA' -> 'uid' was fixed, but
+# "USA" -> "uid" still happened. See technical_lessons_learned.md.
+IDENTIFIER_OR_STRING_PATTERN = re.compile(r"'[^']*'|\"[^\"]*\"|\b[A-Za-z_][A-Za-z0-9_]*\b")
 
 
 def correct_column_names(sql: str, schema: dict) -> str:
@@ -159,8 +167,8 @@ def correct_column_names(sql: str, schema: dict) -> str:
     def replace_identifier(match: re.Match) -> str:
         identifier = match.group(0)
 
-        if identifier.startswith("'"):
-            return identifier  # matched a whole string literal - leave untouched entirely
+        if identifier.startswith("'") or identifier.startswith('"'):
+            return identifier  # matched a whole string literal (either quote style) - leave untouched
 
         identifier_lower = identifier.lower()
 
