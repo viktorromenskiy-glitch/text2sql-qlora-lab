@@ -22,6 +22,7 @@ import yaml
 
 from src.dataset import get_spider_db_dir, load_spider
 from src.evaluator import aggregate_results, evaluate_example
+from src.few_shot import find_similar_examples, format_few_shot_block
 from src.prompt_formatter import CHATML_IM_END, format_prompt
 from src.sanitizer import extract_sql
 from src.schema_pruning import prune_schema
@@ -59,6 +60,7 @@ def run_eval(
     use_postprocessing: bool = False,
     use_value_retrieval: bool = False,
     use_schema_pruning: bool = False,
+    train_examples: list[dict] | None = None,
 ) -> dict:
     """Run one model over the fixed sample, return aggregated metrics.
 
@@ -84,8 +86,15 @@ def run_eval(
             still uses the FULL original schema (example["schema"]), not
             the pruned one, since a hallucinated reference to a pruned
             table should still be correctable against the real schema.
-        All three default to False so baseline/earlier results remain
-        reproducible without these flags - always pass explicitly.
+        train_examples: Spider TRAIN split examples (see few_shot.py) -
+            REQUIRED if the caller wants few-shot examples inserted
+            (pass a non-empty list to enable it). Kept as an explicit
+            parameter rather than a bool flag + internal loading, since
+            loading the train split is expensive and should happen ONCE
+            in main(), not per run_eval() call (baseline AND lora each
+            call run_eval separately).
+        All boolean flags default to False so baseline/earlier results
+        remain reproducible without them - always pass explicitly.
     """
     results = []
     for i, example in enumerate(examples):
@@ -96,6 +105,19 @@ def run_eval(
             prompt_schema = prune_schema(prompt_schema, example["question"])
 
         prompt = format_prompt(prompt_schema, example["question"])
+
+        if train_examples:
+            similar = find_similar_examples(example["question"], train_examples, k=2)
+            few_shot_block = format_few_shot_block(similar)
+            if few_shot_block:
+                # Insert right before "Question: " - format_prompt always
+                # builds "Schema:\n{ddl}\n\nQuestion: {question}" as the
+                # user turn content, so this literal marker is stable
+                # without needing to modify prompt_formatter.py itself
+                # (same splice approach as the value-retrieval hints below).
+                marker = "\n\nQuestion: "
+                insert_at = prompt.rfind(marker)
+                prompt = prompt[:insert_at] + "\n\n" + few_shot_block + prompt[insert_at:]
 
         if use_value_retrieval:
             hints = find_value_hints(example["question"], prompt_schema, db_path)
@@ -171,6 +193,14 @@ def main() -> None:
         "see schema_pruning.py, implementation_priority_plan.md Priority 3. Independent flag, "
         "combine with the others or run alone to measure its effect in isolation.",
     )
+    parser.add_argument(
+        "--few-shot",
+        action="store_true",
+        help="Insert 2 similar examples (by question word overlap) from Spider TRAIN before "
+        "the question - see few_shot.py, implementation_priority_plan.md Priority 4. "
+        "Literature is contradictory on whether this helps on top of SFT - see "
+        "technical_lessons_learned.md. Independent flag, combine or run alone.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -179,9 +209,16 @@ def main() -> None:
     print(f"Post-processing (Levenshtein/case/quote fixes): {'ON' if args.postprocess else 'OFF'}")
     print(f"Value retrieval (DB-content hints): {'ON' if args.value_retrieval else 'OFF'}")
     print(f"Schema pruning (wide schemas only): {'ON' if args.schema_pruning else 'OFF'}")
+    print(f"Few-shot (2 similar train examples): {'ON' if args.few_shot else 'OFF'}")
 
     examples, db_dir = load_sample(config)
     print(f"Evaluating on {len(examples)} examples (fixed sample, seed=42)")
+
+    train_examples = None
+    if args.few_shot:
+        print("Loading Spider TRAIN split for few-shot retrieval (never dev - no leakage)...")
+        train_examples = load_spider("train", data_dir=config["datasets"]["spider_dev"])
+        print(f"Loaded {len(train_examples)} train examples for retrieval")
 
     timeout = config["sql_timeout_seconds"]
     output_dir = config["output_dir"]
@@ -198,6 +235,8 @@ def main() -> None:
         suffix_parts.append("valueretrieval")
     if args.schema_pruning:
         suffix_parts.append("schemapruning")
+    if args.few_shot:
+        suffix_parts.append("fewshot")
     suffix = ("_" + "_".join(suffix_parts)) if suffix_parts else ""
 
     if args.model in ("baseline", "both"):
@@ -208,7 +247,7 @@ def main() -> None:
         baseline_result = run_eval(
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
-            use_schema_pruning=args.schema_pruning,
+            use_schema_pruning=args.schema_pruning, train_examples=train_examples,
         )
         print("\n=== BASELINE (zero-shot) RESULTS ===")
         print(json.dumps(baseline_result, indent=2))
@@ -225,7 +264,7 @@ def main() -> None:
         lora_result = run_eval(
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
-            use_schema_pruning=args.schema_pruning,
+            use_schema_pruning=args.schema_pruning, train_examples=train_examples,
         )
         print("\n=== LoRA (fine-tuned) RESULTS ===")
         print(json.dumps(lora_result, indent=2))
