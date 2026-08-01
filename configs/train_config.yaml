@@ -21,10 +21,9 @@ training:
   learning_rate: 2.0e-4
   batch_size: 4
   gradient_checkpointing: true
-  num_epochs: 3  # EPOCH SWEEP EXPERIMENT, part 2. 1 epoch gave 0.665
-                  # (worse than baseline 0.695), 2 epochs gave 0.700
-                  # (best so far) - checking if 3 continues improving,
-                  # plateaus, or starts overfitting.
+  num_epochs: 4  # EPOCH SWEEP, part 3. Trend so far: 1ep=0.665,
+                  # 2ep=0.700, 3ep=0.735 - still rising, not plateaued -
+                  # worth checking 4 before assuming 3 is near-optimal.
   lr_scheduler_type: cosine
   warmup_ratio: 0.03
   save_every_n_steps: 200
@@ -33,7 +32,7 @@ training:
 
 resume_from_checkpoint: null
 
-checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-3epoch"
+checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-4epoch"
 
 data:
   spider_split: "train"
