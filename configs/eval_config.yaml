@@ -9,9 +9,9 @@ sample_size: 200  # matches Milestone 1/2 baseline for a fair, consistent compar
 
 models:
   base_model_name: "Qwen/Qwen2.5-Coder-7B-Instruct"
-  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-3epoch"
-  lora_checkpoint: "final"  # EPOCH SWEEP, part 2 - compare against
-                             # 1 epoch (0.665) and 2 epochs (0.700)
+  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-4epoch"
+  lora_checkpoint: "final"  # EPOCH SWEEP, part 3 - compare against
+                             # 1ep=0.665, 2ep=0.700, 3ep=0.735
 
 report_by_difficulty: true
 output_dir: "."  # results_baseline.json / results_lora.json written here
