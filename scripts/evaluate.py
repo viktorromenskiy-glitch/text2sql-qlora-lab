@@ -20,8 +20,9 @@ from typing import Any
 
 import yaml
 
+from src.advanced_self_correction import generate_n_candidates, majority_vote
 from src.dataset import get_spider_db_dir, load_spider
-from src.evaluator import aggregate_results, evaluate_example
+from src.evaluator import aggregate_results, evaluate_example, execute_sql
 from src.few_shot import find_similar_examples, format_few_shot_block
 from src.prompt_formatter import CHATML_IM_END, format_prompt
 from src.sanitizer import extract_sql
@@ -61,6 +62,8 @@ def run_eval(
     use_value_retrieval: bool = False,
     use_schema_pruning: bool = False,
     train_examples: list[dict] | None = None,
+    use_advanced_correction: bool = False,
+    n_candidates: int = 5,
 ) -> dict:
     """Run one model over the fixed sample, return aggregated metrics.
 
@@ -93,6 +96,17 @@ def run_eval(
             loading the train split is expensive and should happen ONCE
             in main(), not per run_eval() call (baseline AND lora each
             call run_eval separately).
+        use_advanced_correction: if True, generates n_candidates SQL
+            completions via SAMPLING (not the single greedy generation
+            used otherwise) and picks by majority vote on the execution
+            RESULT - see advanced_self_correction.py,
+            implementation_priority_plan.md Priority 5. Expensive
+            (n_candidates x the generation cost of every other flag) -
+            each candidate still goes through use_postprocessing if that
+            flag is also on, before voting, so voting reflects our best
+            per-candidate correction, not raw model output.
+        n_candidates: how many sampled candidates per example when
+            use_advanced_correction is True - ignored otherwise.
         All boolean flags default to False so baseline/earlier results
         remain reproducible without them - always pass explicitly.
     """
@@ -130,17 +144,28 @@ def run_eval(
                 hint_text = "\n" + "\n".join(hints)
                 prompt = prompt[:insert_at] + hint_text + prompt[insert_at:]
 
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        output_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
-        raw_output = tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        def postprocess(sql: str | None) -> str | None:
+            if use_postprocessing and sql is not None:
+                # Deliberately uses the FULL original schema, not
+                # prompt_schema - see docstring note on use_schema_pruning.
+                sql = correct_table_names(sql, example["schema"]["table_names_original"])
+                sql = correct_column_names(sql, example["schema"])
+                sql = normalize_string_quotes(sql, example["schema"])
+            return sql
 
-        predicted_sql = extract_sql(raw_output)
-        if use_postprocessing and predicted_sql is not None:
-            # Deliberately uses the FULL original schema, not prompt_schema -
-            # see docstring note on use_schema_pruning above.
-            predicted_sql = correct_table_names(predicted_sql, example["schema"]["table_names_original"])
-            predicted_sql = correct_column_names(predicted_sql, example["schema"])
-            predicted_sql = normalize_string_quotes(predicted_sql, example["schema"])
+        if use_advanced_correction:
+            raw_candidates = generate_n_candidates(model, tokenizer, prompt, n=n_candidates)
+            candidates_with_results = []
+            for candidate_sql in raw_candidates:
+                candidate_sql = postprocess(candidate_sql)
+                candidate_rows = execute_sql(candidate_sql, db_path, timeout) if candidate_sql is not None else None
+                candidates_with_results.append((candidate_sql, candidate_rows))
+            predicted_sql = majority_vote(candidates_with_results)
+        else:
+            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+            output_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
+            raw_output = tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+            predicted_sql = postprocess(extract_sql(raw_output))
 
         results.append(evaluate_example(
             predicted_sql=predicted_sql,
@@ -201,6 +226,14 @@ def main() -> None:
         "Literature is contradictory on whether this helps on top of SFT - see "
         "technical_lessons_learned.md. Independent flag, combine or run alone.",
     )
+    parser.add_argument(
+        "--advanced-self-correction",
+        action="store_true",
+        help="Generate 5 candidates via sampling and pick by majority vote on execution "
+        "result - see advanced_self_correction.py, implementation_priority_plan.md Priority "
+        "5. EXPENSIVE (5x generation cost). Different from the already-tested, rejected "
+        "simple self_correction.py (single retry, 0 effect) - see technical_lessons_learned.md.",
+    )
     args = parser.parse_args()
 
     setup_logging()
@@ -210,6 +243,7 @@ def main() -> None:
     print(f"Value retrieval (DB-content hints): {'ON' if args.value_retrieval else 'OFF'}")
     print(f"Schema pruning (wide schemas only): {'ON' if args.schema_pruning else 'OFF'}")
     print(f"Few-shot (2 similar train examples): {'ON' if args.few_shot else 'OFF'}")
+    print(f"Advanced self-correction (5-candidate voting): {'ON' if args.advanced_self_correction else 'OFF'}")
 
     examples, db_dir = load_sample(config)
     print(f"Evaluating on {len(examples)} examples (fixed sample, seed=42)")
@@ -237,6 +271,8 @@ def main() -> None:
         suffix_parts.append("schemapruning")
     if args.few_shot:
         suffix_parts.append("fewshot")
+    if args.advanced_self_correction:
+        suffix_parts.append("advcorrection")
     suffix = ("_" + "_".join(suffix_parts)) if suffix_parts else ""
 
     if args.model in ("baseline", "both"):
@@ -248,6 +284,7 @@ def main() -> None:
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
             use_schema_pruning=args.schema_pruning, train_examples=train_examples,
+            use_advanced_correction=args.advanced_self_correction,
         )
         print("\n=== BASELINE (zero-shot) RESULTS ===")
         print(json.dumps(baseline_result, indent=2))
@@ -265,6 +302,7 @@ def main() -> None:
             model, tokenizer, examples, db_dir, timeout,
             use_postprocessing=args.postprocess, use_value_retrieval=args.value_retrieval,
             use_schema_pruning=args.schema_pruning, train_examples=train_examples,
+            use_advanced_correction=args.advanced_self_correction,
         )
         print("\n=== LoRA (fine-tuned) RESULTS ===")
         print(json.dumps(lora_result, indent=2))
