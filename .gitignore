@@ -1,0 +1,33 @@
+# Датасеты — большие, скачиваются отдельно (см. data/README.md), не коммитятся
+data/spider/
+data/bird/
+*.zip
+ 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+ 
+# Виртуальные окружения
+venv/
+.venv/
+env/
+ 
+# Результаты отдельных экспериментальных прогонов - не общий код.
+# results_baseline.json - ИСКЛЮЧЕНИЕ, закоммичен намеренно как референс.
+results_lora*.json
+*.log
+ 
+# IDE / редакторы
+.vscode/
+.idea/
+*.swp
+ 
+# ОС
+.DS_Store
+Thumbs.db
+ 
+# Google Colab
+.ipynb_checkpoints/
+ 
