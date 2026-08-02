@@ -23,8 +23,11 @@ training:
   learning_rate: 2.0e-4
   batch_size: 4
   gradient_checkpointing: true
-  num_epochs: 3  # FIXED at our proven optimum from the epoch sweep -
-                  # only varying rank/alpha this time, not re-testing epochs.
+  num_epochs: 2  # LORA RANK SWEEP, part 2 - r=32 at 3 epochs gave 0.670
+                  # (worse than r=16's 0.735) - checking if r=32 simply
+                  # overfits faster (earlier peak, e.g. at 2 epochs) with
+                  # more capacity on the same 7000-example dataset,
+                  # rather than being categorically worse.
   lr_scheduler_type: cosine
   warmup_ratio: 0.03
   save_every_n_steps: 200
@@ -33,7 +36,7 @@ training:
 
 resume_from_checkpoint: null
 
-checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-r32"
+checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-r32-2epoch"
 
 data:
   spider_split: "train"
