@@ -9,13 +9,12 @@ sample_size: 200  # matches Milestone 1/2 baseline for a fair, consistent compar
 
 models:
   base_model_name: "Qwen/Qwen2.5-Coder-7B-Instruct"
-  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-3epoch"
-  lora_checkpoint: "final"  # EPOCH SWEEP WINNER: 3 epochs gave 0.735
-                             # pure SFT (vs 0.700 for 2 epochs, 0.690 for
-                             # 4 - clear peak). Now combining with our
-                             # best techniques (postprocess + value
-                             # retrieval + few-shot) on top of this
-                             # stronger base checkpoint.
+  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-r32"
+  lora_checkpoint: "final"  # LORA RANK SWEEP: r=32/alpha=64 (was
+                             # r=16/alpha=32 in our best result, 0.785),
+                             # 3 epochs fixed. Compare pure SFT EX
+                             # against r=16's 0.735 to see if doubled
+                             # capacity helps or overfits faster.
 
 report_by_difficulty: true
 output_dir: "."  # results_baseline.json / results_lora.json written here
