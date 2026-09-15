@@ -1,5 +1,7 @@
 # Text-to-SQL Fine-tuning — QLoRA на Qwen2.5-Coder-7B
 
+*English version: [README.en.md](./README.en.md) · Українська версія: [README.uk.md](./README.uk.md)*
+
 Дообучение открытой LLM для перевода вопросов на естественном языке в
 SQL-запросы. Честный, полностью задокументированный путь от zero-shot
 baseline до результата, превосходящего сопоставимую опубликованную
@@ -81,3 +83,7 @@ python scripts/evaluate.py --model lora --postprocess --value-retrieval --sample
 ## Лицензия данных и модели
 
 Spider dataset — CC BY-SA 4.0. Qwen2.5-Coder-7B-Instruct — Apache 2.0.
+
+## Об авторе
+
+Виктор Роменский — GenAI/ML-инженер (RAG-системы, оценка LLM, fine-tuning). GitHub: [viktorromenskiy-glitch](https://github.com/viktorromenskiy-glitch) · LinkedIn: [профиль](https://www.linkedin.com/in/%D0%B2%D0%B8%D0%BA%D1%82%D0%BE%D1%80-%D1%80%D0%BE%D0%BC%D0%B5%D0%BD%D1%81%D0%BA%D0%B8%D0%B9-029b2086/) · Hugging Face: [ViktorPetrov123](https://huggingface.co/ViktorPetrov123) · Контакт: viktorromenskiy@gmail.com
