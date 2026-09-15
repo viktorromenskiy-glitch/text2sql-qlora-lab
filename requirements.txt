@@ -1,0 +1,29 @@
+# scripts/evaluate.py and the src/ modules do standard SQL generation and
+# evaluation with just these two at import time - the GPU model-loading deps
+# below are imported lazily behind a GPU-only guard (see src/model.py and
+# scripts/evaluate.py: "local import - GPU-only dep" / "heavy, only needed
+# here"), so they're only required when scripts/train.py or the GPU code
+# paths are actually exercised.
+numpy>=1.24
+pyyaml>=6.0
+
+# QLoRA fine-tuning (scripts/train.py) and GPU inference (src/model.py).
+# NOT reproducible with a plain `pip install -r requirements.txt`: torch
+# needs a CUDA-specific wheel index and unsloth needs a git install. Use the
+# exact sequence in RUNBOOK_milestone2.md (Шаг 1) instead:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+#   pip install --no-deps xformers trl peft accelerate bitsandbytes gdown pyyaml
+# Listed below for documentation/completeness, not for a literal install:
+torch
+torchvision
+torchaudio
+transformers
+trl
+peft
+accelerate
+bitsandbytes
+xformers
+unsloth
+datasets
+gdown
