@@ -1,6 +1,6 @@
 # Text-to-SQL Fine-tuning — QLoRA на Qwen2.5-Coder-7B
 
-*English version: [README.en.md](./README.en.md) · Українська версія: [README.uk.md](./README.uk.md)*
+*English version: [README.md](./README.md) · Українська версія: [README.uk.md](./README.uk.md)*
 
 Дообучение открытой LLM для перевода вопросов на естественном языке в
 SQL-запросы. Честный, полностью задокументированный путь от zero-shot
