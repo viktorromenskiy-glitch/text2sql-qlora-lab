@@ -7,6 +7,8 @@ bugs found and fixed along the way, not just the final metric.
 
 *Русская версия: [README.ru.md](./README.ru.md) · Українська версія: [README.uk.md](./README.uk.md)*
 
+**In short:** business teams that need answers from a database usually wait on an engineer to write the query, or pay per-call for a hosted text-to-SQL API. This project fine-tunes an open 7B model to do the translation in-house: natural-language question in, SQL out, no per-query API cost, no data leaving your infrastructure. Fine-tuned with QLoRA, it reaches 78.5% execution accuracy — 9.0 points over the zero-shot baseline, and 1.3 points above a comparable published result (Llama 3 8B, same dataset, 77.2% EX). Stack: PyTorch, Unsloth, QLoRA/PEFT, Qwen2.5-Coder-7B-Instruct, Google Colab. For a company sitting on a database and a set of routine natural-language queries, this is the kind of in-house, cost-controlled text-to-SQL layer I build — instead of paying per-call for a hosted model.
+
 ## Result
 
 | Stage | Execution Accuracy |
