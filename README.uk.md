@@ -6,7 +6,7 @@ baseline до результату, що перевершує співставн
 включно зі знайденими та виправленими технічними помилками, а не лише
 фінальною метрикою.
 
-*English version: [README.en.md](./README.en.md) · Русская версия: [README.md](./README.md)*
+*English version: [README.md](./README.md) · Русская версия: [README.ru.md](./README.ru.md)*
 
 ## Результат
 
