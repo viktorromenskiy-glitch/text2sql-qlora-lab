@@ -5,7 +5,7 @@ queries. An honest, fully documented path from zero-shot baseline to a
 result surpassing a comparable published work — including the technical
 bugs found and fixed along the way, not just the final metric.
 
-*Русская версия: [README.md](./README.md) · Українська версія: [README.uk.md](./README.uk.md)*
+*Русская версия: [README.ru.md](./README.ru.md) · Українська версія: [README.uk.md](./README.uk.md)*
 
 ## Result
 
