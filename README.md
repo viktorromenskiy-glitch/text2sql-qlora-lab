@@ -38,6 +38,7 @@ Few-shot retrieval lowered accuracy and is not used in the final configuration.
 - The techniques and the number of epochs were chosen by looking at results on these same 200 examples, so 78.5% is likely somewhat optimistic compared with unseen data.
 - Published results usually use the full dev set (1,034 examples); for reference, Llama 3 8B with QLoRA is reported at 77.2% there. The two numbers are on different subsets and are **not a like-for-like comparison**.
 - Spider test labels are not available locally, so no test-set result is reported.
+- Run-to-run variation: the final configuration scored 78.5% (157/200) on 1 Aug 2026. On 2 Aug, in a newer software and GPU environment, a separate script (`scripts/final_regression_and_errors.py`) again found 43 wrong answers (78.5%), while the same `scripts/evaluate.py` command with the same adapter gave 75.5% (151/200). The cause of the 3-point difference was not established, so treat 78.5% as the best observed result, not a stable estimate.
 - Only the final adapter (r=16, 3 epochs) is kept: its weights have SHA-256 `1ab75e6db713820c7a3fb06dff0e0ddb5119f3e550eb1688e263849904118a0f`. Earlier adapters from the hyperparameter experiments are no longer stored, so those runs cannot be re-run.
 
 ## Why this isn't "just running a tutorial"
