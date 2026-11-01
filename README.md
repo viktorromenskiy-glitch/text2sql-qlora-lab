@@ -46,7 +46,7 @@ Getting to the final result required finding and fixing real technical bugs — 
 
 - Loss was computed over the entire prompt (including the DB schema), not just the target SQL — the model was spending gradient updates on "copying" context instead of learning to generate SQL
 - No LR schedule (warmup + cosine decay)
-- Optimizer state silently reset when resuming training after a session drop
+- Resuming training after a Colab session drop silently overwrote earlier checkpoints (checkpoint numbers restarted at 0) and filled the Drive; fixed with a step offset and automatic cleanup of old checkpoints
 - Post-processing quote handling corrupted string literals like `'USA'`, mistaking them for hallucinated column names
 
 Further notes on pitfalls: [`technical_lessons_learned.md`](./technical_lessons_learned.md) (in Russian).
