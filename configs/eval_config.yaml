@@ -9,11 +9,12 @@ sample_size: 200  # matches Milestone 1/2 baseline for a fair, consistent compar
 
 models:
   base_model_name: "Qwen/Qwen2.5-Coder-7B-Instruct"
-  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-r32-2epoch"
-  lora_checkpoint: "final"  # LORA RANK SWEEP, part 2 - r=32, 2 epochs.
-                             # r=32/3ep gave 0.670 (worse than r=16/3ep's
-                             # 0.735) - checking if r=32 just has an
-                             # earlier peak (fewer epochs) instead.
+  lora_checkpoint_dir: "/content/drive/MyDrive/text2sql-checkpoints-3epoch"
+  lora_checkpoint: "final"  # LoRA r=16, alpha=32, 3 epochs on Spider train (7,000 examples).
+                             # adapter_model.safetensors SHA-256:
+                             # 1ab75e6db713820c7a3fb06dff0e0ddb5119f3e550eb1688e263849904118a0f
+                             # Result with --postprocess --value-retrieval --sample-values:
+                             # 0.785 (157/200) on the first 200 Spider dev examples.
 
 report_by_difficulty: true
 output_dir: "."  # results_baseline.json / results_lora.json written here
